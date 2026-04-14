@@ -46,12 +46,13 @@ const Store = {
 // 3. Enable Authentication (Google + Email/Password)
 // 4. Enable Cloud Firestore (Start in test mode)
 const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT_ID.firebasestorage.app",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId: "YOUR_APP_ID"
+    apiKey: "AIzaSyBJs9gYN8pAbQNU641U71B5rVrWzroZnk8",
+    authDomain: "spliz-54aa3.firebaseapp.com",
+    projectId: "spliz-54aa3",
+    storageBucket: "spliz-54aa3.firebasestorage.app",
+    messagingSenderId: "881113339969",
+    appId: "1:881113339969:web:a84695df9dede47267cec0",
+    measurementId: "G-V1KCHVRVBK"
 };
 
 let firebaseReady = false;
