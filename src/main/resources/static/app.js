@@ -59,15 +59,22 @@ let firebaseReady = false;
 let currentUser = null;
 
 try {
-    if (typeof firebase !== 'undefined' && firebaseConfig.apiKey !== "YOUR_API_KEY") {
-        firebase.initializeApp(firebaseConfig);
+    if (typeof firebase !== 'undefined' && firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY") {
+        // Prevent duplicate app initialization
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
         firebaseReady = true;
-        console.log('🔥 Firebase initialized');
-    } else if (typeof firebase !== 'undefined') {
+        console.log('🔥 Firebase initialized successfully');
+        console.log('🔒 Auth domain:', firebaseConfig.authDomain);
+    } else if (typeof firebase === 'undefined') {
+        console.error('❌ Firebase SDK not loaded! Check your internet connection and script tags.');
+    } else {
         console.warn('⚠️ Firebase config not set — using localStorage only. Edit firebaseConfig in app.js');
     }
 } catch (e) {
-    console.warn('Firebase init failed:', e);
+    console.error('❌ Firebase init failed:', e.message);
+    console.error('Full error:', e);
 }
 
 // ==========================================
@@ -1377,40 +1384,113 @@ function updateGroupDropdowns() {
 // ==========================================
 // FIREBASE AUTH & FIRESTORE
 // ==========================================
+function getFirebaseErrorMessage(err) {
+    const code = err.code || '';
+    const messages = {
+        'auth/popup-blocked': 'Popup was blocked. Please allow popups for this site and try again.',
+        'auth/popup-closed-by-user': 'Sign-in popup was closed. Please try again.',
+        'auth/cancelled-popup-request': 'Another sign-in attempt is in progress.',
+        'auth/unauthorized-domain': 'This domain is not authorized in Firebase. Go to Firebase Console → Authentication → Settings → Authorized Domains and add "localhost".',
+        'auth/operation-not-allowed': 'Google sign-in is not enabled. Go to Firebase Console → Authentication → Sign-in methods and enable Google.',
+        'auth/network-request-failed': 'Network error. Check your internet connection.',
+        'auth/user-not-found': 'No account found with this email. Please sign up first.',
+        'auth/wrong-password': 'Incorrect password. Please try again.',
+        'auth/invalid-email': 'Invalid email address format.',
+        'auth/email-already-in-use': 'An account already exists with this email. Please sign in instead.',
+        'auth/weak-password': 'Password must be at least 6 characters.',
+        'auth/too-many-requests': 'Too many failed attempts. Please wait a moment and try again.',
+        'auth/invalid-credential': 'Invalid email or password. Please check and try again.',
+        'auth/configuration-not-found': 'Firebase Auth not configured properly. Enable Authentication in Firebase Console.'
+    };
+    return messages[code] || err.message || 'An error occurred. Please try again.';
+}
+
 function loginWithGoogle() {
-    if (!firebaseReady) { showToast('Firebase not configured yet — see app.js', 'error'); return; }
+    if (!firebaseReady) {
+        showToast('Firebase not initialized. Check console for errors.', 'error');
+        console.error('Firebase not ready. Check firebaseConfig in app.js and that Firebase SDK scripts loaded.');
+        return;
+    }
     const provider = new firebase.auth.GoogleAuthProvider();
-    firebase.auth().signInWithPopup(provider).catch(err => {
-        console.error('Google login error:', err);
-        showToast(err.message, 'error');
-    });
+    provider.addScope('email');
+    provider.addScope('profile');
+
+    // Show loading state
+    const btn = document.getElementById('btn-google-login');
+    const originalHTML = btn.innerHTML;
+    btn.innerHTML = '<span style="opacity:0.7">Signing in with Google...</span>';
+    btn.disabled = true;
+
+    firebase.auth().signInWithPopup(provider)
+        .then(result => {
+            console.log('✅ Google sign-in successful:', result.user.displayName);
+        })
+        .catch(err => {
+            console.error('❌ Google popup sign-in error:', err.code, err.message);
+            btn.innerHTML = originalHTML;
+            btn.disabled = false;
+
+            if (err.code === 'auth/popup-blocked' || err.code === 'auth/popup-closed-by-user') {
+                // Fallback to redirect
+                showToast('Popup blocked — redirecting instead...', 'info');
+                setTimeout(() => {
+                    firebase.auth().signInWithRedirect(provider).catch(redirectErr => {
+                        console.error('❌ Google redirect sign-in error:', redirectErr);
+                        showToast(getFirebaseErrorMessage(redirectErr), 'error');
+                    });
+                }, 500);
+            } else {
+                showToast(getFirebaseErrorMessage(err), 'error');
+            }
+        });
 }
 
 function loginWithEmail() {
-    if (!firebaseReady) { showToast('Firebase not configured yet — see app.js', 'error'); return; }
+    if (!firebaseReady) { showToast('Firebase not initialized. Check console for errors.', 'error'); return; }
     const email = document.getElementById('login-email').value.trim();
     const password = document.getElementById('login-password').value;
     if (!email || !password) { showToast('Enter email and password', 'error'); return; }
-    firebase.auth().signInWithEmailAndPassword(email, password).catch(err => {
-        console.error('Email login error:', err);
-        showToast(err.message, 'error');
-    });
+    
+    const btn = document.querySelector('.login-submit');
+    if (btn) { btn.textContent = 'Signing in...'; btn.disabled = true; }
+    
+    firebase.auth().signInWithEmailAndPassword(email, password)
+        .then(result => {
+            console.log('✅ Email sign-in successful:', result.user.email);
+        })
+        .catch(err => {
+            console.error('❌ Email login error:', err.code, err.message);
+            if (btn) { btn.textContent = 'Sign In'; btn.disabled = false; }
+            showToast(getFirebaseErrorMessage(err), 'error');
+        });
 }
 
 function signupWithEmail() {
-    if (!firebaseReady) { showToast('Firebase not configured yet — see app.js', 'error'); return; }
+    if (!firebaseReady) { showToast('Firebase not initialized. Check console for errors.', 'error'); return; }
     const name = document.getElementById('signup-name').value.trim();
     const email = document.getElementById('signup-email').value.trim();
     const password = document.getElementById('signup-password').value;
-    if (!name) { showToast('Enter your name', 'error'); return; }
-    if (!email || !password) { showToast('Enter email and password', 'error'); return; }
+    if (!name) { showToast('Enter your display name', 'error'); return; }
+    if (!email) { showToast('Enter your email address', 'error'); return; }
+    if (!password) { showToast('Enter a password', 'error'); return; }
     if (password.length < 6) { showToast('Password must be at least 6 characters', 'error'); return; }
+    
+    const btn = document.querySelector('#signup-form-area .login-submit');
+    if (btn) { btn.textContent = 'Creating Account...'; btn.disabled = true; }
+    
     firebase.auth().createUserWithEmailAndPassword(email, password)
-        .then(cred => cred.user.updateProfile({ displayName: name }))
-        .then(() => showToast('Account created!', 'success'))
+        .then(cred => {
+            console.log('✅ Account created:', cred.user.email);
+            return cred.user.updateProfile({ displayName: name });
+        })
+        .then(() => {
+            showToast('Account created successfully! Welcome to Spliz! 🎉', 'success');
+            showConfetti();
+        })
         .catch(err => {
-            console.error('Signup error:', err);
-            showToast(err.message, 'error');
+            console.error('❌ Signup error:', err.code, err.message);
+            if (btn) { btn.textContent = 'Create Account'; btn.disabled = false; }
+            showToast(getFirebaseErrorMessage(err), 'error');
         });
 }
 
@@ -1488,20 +1568,31 @@ async function handleAuthStateChange(user) {
     const profile = document.getElementById('user-profile');
 
     if (user) {
+        console.log('👤 User signed in:', user.displayName || user.email, '| UID:', user.uid);
         overlay.style.display = 'none';
         profile.style.display = 'flex';
+        
         const avatar = document.getElementById('user-avatar');
         const displayName = user.displayName || user.email || 'User';
         avatar.textContent = displayName.charAt(0).toUpperCase();
         avatar.title = displayName;
         avatar.style.background = getAvatarColor(displayName);
 
+        // Reset button states in case they were loading
+        const googleBtn = document.getElementById('btn-google-login');
+        if (googleBtn) {
+            googleBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg> Sign in with Google`;
+            googleBtn.disabled = false;
+        }
+
         await loadFromFirestore();
         refreshAll();
-        showToast(`Welcome, ${displayName}! ☁️`, 'success');
+        showToast(`Welcome back, ${displayName}! ☁️ Data synced.`, 'success');
     } else {
+        console.log('👤 No user signed in — showing login screen');
         overlay.style.display = 'flex';
         profile.style.display = 'none';
+        currentUser = null;
     }
 }
 
@@ -1571,9 +1662,23 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Firebase Auth or direct load
     if (firebaseReady) {
+        console.log('🔑 Setting up Firebase Auth listener...');
+        // Handle redirect result first (for signInWithRedirect flow)
+        firebase.auth().getRedirectResult().then(result => {
+            if (result && result.user) {
+                console.log('✅ Redirect sign-in successful:', result.user.displayName);
+            }
+        }).catch(err => {
+            console.error('❌ Redirect result error:', err.code, err.message);
+            if (err.code !== 'auth/no-auth-event') {
+                showToast(err.message || 'Sign-in redirect failed', 'error');
+            }
+        });
+        
         firebase.auth().onAuthStateChanged(handleAuthStateChange);
     } else {
         // No Firebase — hide login, use localStorage
+        console.warn('⚠️ Firebase not ready — running in offline mode (localStorage only)');
         document.getElementById('login-overlay').style.display = 'none';
         refreshDashboard();
     }
